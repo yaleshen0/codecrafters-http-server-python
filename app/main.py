@@ -16,15 +16,19 @@ def main():
     #
     server_socket = socket.create_server(("localhost", 4221), reuse_port=True)
     conn, addr=server_socket.accept() # wait for client
-    conn.sendall(b"HTTP/1.1 200 OK\r\n\r\n")
-    # with conn:
-    #     while True:
-    #         request = conn.recv(1024)
-    #         if not request:
-    #             break
-    #         req_lines = request.decode('utf-8').split(CRLF,1)
-    #         # _, headers = request.decode('utf-8').split('\r\n', 1)
-    #         method, url, protocol=parse_request_line(req_lines[0])
+    # conn.sendall(b"HTTP/1.1 200 OK\r\n\r\n")
+    with conn:
+        while True:
+            request = conn.recv(1024)
+            if not request:
+                break
+            req_lines = request.decode('utf-8').split(CRLF,1)
+            # _, headers = request.decode('utf-8').split('\r\n', 1)
+            method, url, protocol=parse_request_line(req_lines[0])
+            if (url!='/'):
+                conn.sendall(b'HTTP/1.1 404 Not Found\r\n\r\n')
+            else:
+                conn.sendall(b'HTTP/1.1 200 OK\r\n\r\n')
             
 if __name__ == "__main__":
     main()
