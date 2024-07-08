@@ -1,6 +1,8 @@
 # Uncomment this to pass the first stage
 import socket
 import re
+import selectors
+import types
 
 DEFAULT_HTTP_VERSION = 'HTTP/1.1'
 CRLF = '\r\n'
@@ -39,22 +41,23 @@ def get_user_agent(user_agent, url, protocol):
     content_type = 'Content-Type: text/plain\r\n'
     content_length = f'Content-Length: {user_agent_length}\r\n\r\n'
     return (status_line+content_type+content_length+user_agent).encode()
+def accept_wrapper(sock, sel):
+    conn,addr = sock.accept()
+    print(f"Accepted connection from {addr}")
 
-def main():
-    # You can use print statements as follows for debugging, they'll be visible when running tests.
-    print("Logs from your program will appear here!")
+    conn.setblocking(False)
+    data = types.SimpleNamespace(addr=addr, inb=b"", outb=b"")
+    events = selectors.EVENT_READ | selectors.EVENT_WRITE
+    sel.register(conn, events, data=data)
 
-    # Uncomment this to pass the first stage
-    #
-    server_socket = socket.create_server(("localhost", 4221), reuse_port=True)
-    conn, addr=server_socket.accept() # wait for client
-    # conn.sendall(b"HTTP/1.1 200 OK\r\n\r\n")
-    with conn:
-        while True:
-            request = conn.recv(1024).decode('utf-8')
-            if not request:
-                break
-            req_lines = request.split(CRLF,1)
+def service_connection(key, mask, sel):
+    sock = key.fileobj
+    data = key.data
+    if mask & selectors.EVENT_READ:
+        recv_data = sock.recv(1024)
+        if recv_data:
+            recv_data = recv_data.decode('utf-8')
+            req_lines = recv_data.split(CRLF,1)
             # _, headers = request.decode('utf-8').split('\r\n', 1)
             method, url, protocol=parse_request_line(req_lines[0])
             # get body response 
@@ -63,17 +66,46 @@ def main():
             user_agent_string = req_lines[1].split('\n')[1]
             if get_after_user_agent(user_agent_string)!='':
                 body=get_user_agent(get_after_user_agent(user_agent_string), url, protocol)
-                conn.sendall(body)
-            #     conn.sendall(body)
+                sock.sendall(body)
             else:
-                conn.sendall(body)
-            # conn.sendall(body)
-            # match url:
-            #     case '/':
-            #         conn.sendall(b'HTTP/1.1 404 Not Found\r\n\r\n')
-            #     case 
-            #     case _:
-            #         conn.sendall(b'HTTP/1.1 200 OK\r\n\r\n')
+                sock.sendall(body)
+            data.outb += recv_data.encode('utf-8')
+        else:
+            print(f"Closing connection to {data.addr}")
+            sel.unregister(sock)
+            sock.close()
+    # if mask & selectors.EVENT_WRITE:
+    #     if data.outb:
+    #         sent = sock.sendall(data.outb)
+    #         data.outb = data.outb[sent:]
+
+def main():
+    # You can use print statements as follows for debugging, they'll be visible when running tests.
+    print("Logs from your program will appear here!")
+
+    # Uncomment this to pass the first stage
+    #
+    # server_socket = socket.create_server(("localhost", 4221), reuse_port=True)
+    sel = selectors.DefaultSelector()
+    host, port = "localhost", 4221
+    lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    lsock.bind((host, port))
+    lsock.listen()
+    lsock.setblocking(False)
+    sel.register(lsock, selectors.EVENT_READ, data=None)
+    # conn, addr=server_socket.accept() # wait for client
+    try:
+        while True:
+            events = sel.select(timeout=None)
+            for key, mask in events:
+                if key.data is None:
+                    accept_wrapper(key.fileobj, sel)
+                else:
+                    service_connection(key, mask, sel)
+    except KeyboardInterrupt:
+        print("Caught keyboard interrupt, exiting")
+    finally:
+        sel.close()
             
 if __name__ == "__main__":
     main()
