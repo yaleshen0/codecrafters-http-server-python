@@ -53,17 +53,29 @@ def accept_wrapper(sock, sel):
     events = selectors.EVENT_READ | selectors.EVENT_WRITE
     sel.register(conn, events, data=data)
 
-def get_file(directory, file_name):
-    try:
-        body = ""
-        with open(f"/{directory}/{file_name}", "r") as file:
-            body = file.read()
-        status_line = 'HTTP/1.1 200 OK\r\n'
-        content_type = 'Content-Type: application/octet-stream\r\n'
-        content_length = f'Content-Length: {len(body)}\r\n\r\n'
-        return (status_line + content_type + content_length + body).encode()
-    except Exception as e:
-        return "HTTP/1.1 404 Not Found\r\n\r\n".encode()
+def get_file(directory, file_name, method, content=""):
+    if method.upper()=='GET':
+        try:
+            body = ""
+            with open(f"/{directory}/{file_name}", "r") as file:
+                body = file.read()
+            if method.upper()=='GET':
+                status_line = 'HTTP/1.1 200 OK\r\n'
+                content_type = 'Content-Type: application/octet-stream\r\n'
+                content_length = f'Content-Length: {len(body)}\r\n\r\n'
+                return (status_line + content_type + content_length + body).encode()
+        except Exception as e:
+            return "HTTP/1.1 404 Not Found\r\n\r\n".encode()
+    elif method.upper()=='POST':
+        try:
+            with open(f"/{directory}/{file_name}", "w") as file:
+                file.write(content)
+                file.close()
+            return 'HTTP/1.1 201 CREATED\r\n\r\n'.encode()
+            
+        except Exception as e:
+            return "HTTP/1.1 404 Not Found\r\n\r\n".encode()
+# def get_post_body():
 
 def service_connection(key, mask, sel):
     sock = key.fileobj
@@ -79,14 +91,22 @@ def service_connection(key, mask, sel):
             body = get_body(url, protocol)
             # read header
             user_agent_string = req_lines[1].split('\n')[1]
+            agent = get_after_user_agent(user_agent_string)
+            
+            if method.upper() == 'POST':
+                directory = sys.argv[2]
+                file_name = url[7:]
+                content = req_lines[1].split('\n')[-1]
+                print(directory, file_name, content)
+                response = get_file(directory, file_name, 'POST', content)
+                sock.sendall('HTTP/1.1 201 Created\r\n\r\n'.encode())
             if url.startswith('/files'):
                 directory = sys.argv[2]
                 file_name = url[7:]
                 # print(directory,file_name)
-                response = get_file(directory, file_name)
+                response = get_file(directory, file_name, 'GET')
                 sock.sendall(response)
-
-            if get_after_user_agent(user_agent_string)!='':
+            if agent!='':
                 body=get_user_agent(get_after_user_agent(user_agent_string), url, protocol)
                 sock.sendall(body)
             else:
