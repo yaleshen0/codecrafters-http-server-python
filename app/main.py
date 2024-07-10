@@ -3,6 +3,7 @@ import socket
 import re
 import selectors
 import types
+import sys
 
 DEFAULT_HTTP_VERSION = 'HTTP/1.1'
 CRLF = '\r\n'
@@ -27,6 +28,7 @@ def get_body(url, protocol):
     content_type = 'Content-Type: text/plain\r\n'
     content_length = f'Content-Length: {echo_length}\r\n\r\n'
     return (status_line+content_type+content_length+echo_string).encode()
+
 def get_after_user_agent(str):
     match=re.search(r'User-Agent: (.*)\r' ,str)
     if match:
@@ -41,6 +43,7 @@ def get_user_agent(user_agent, url, protocol):
     content_type = 'Content-Type: text/plain\r\n'
     content_length = f'Content-Length: {user_agent_length}\r\n\r\n'
     return (status_line+content_type+content_length+user_agent).encode()
+
 def accept_wrapper(sock, sel):
     conn,addr = sock.accept()
     print(f"Accepted connection from {addr}")
@@ -49,6 +52,18 @@ def accept_wrapper(sock, sel):
     data = types.SimpleNamespace(addr=addr, inb=b"", outb=b"")
     events = selectors.EVENT_READ | selectors.EVENT_WRITE
     sel.register(conn, events, data=data)
+
+def get_file(directory, file_name):
+    try:
+        body = ""
+        with open(f"/{directory}/{file_name}", "r") as file:
+            body = file.read()
+        status_line = 'HTTP/1.1 200 OK\r\n'
+        content_type = 'Content-Type: application/octet-stream\r\n'
+        content_length = f'Content-Length: {len(body)}\r\n\r\n'
+        return (status_line + content_type + content_length + body).encode()
+    except Exception as e:
+        return "HTTP/1.1 404 Not Found\r\n\r\n".encode()
 
 def service_connection(key, mask, sel):
     sock = key.fileobj
@@ -64,11 +79,19 @@ def service_connection(key, mask, sel):
             body = get_body(url, protocol)
             # read header
             user_agent_string = req_lines[1].split('\n')[1]
+            if url.startswith('/files'):
+                directory = sys.argv[2]
+                file_name = url[7:]
+                # print(directory,file_name)
+                response = get_file(directory, file_name)
+                sock.sendall(response)
+
             if get_after_user_agent(user_agent_string)!='':
                 body=get_user_agent(get_after_user_agent(user_agent_string), url, protocol)
                 sock.sendall(body)
             else:
                 sock.sendall(body)
+            
             data.outb += recv_data.encode('utf-8')
         else:
             print(f"Closing connection to {data.addr}")
